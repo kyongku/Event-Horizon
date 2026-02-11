@@ -1,29 +1,34 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Event Horizon: Gravity Junkyard</title>
-  <link rel="stylesheet" href="style.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event Horizon</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="ui">
-    <div id="stats">
-      <div>라운드: <span id="round">1</span></div>
-      <div>현재 점수: <span id="currentScore">0</span></div>
-      <div>총 점수: <span id="totalScore">0</span></div>
-      <div>열량: <span id="heat">0</span>%</div>
-      <div>거리: <span id="distance">0</span></div>
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+        <div id="ui">
+            <div id="score-panel">
+                <div class="stat">점수: <span id="current-score">0</span></div>
+                <div class="stat">최고: <span id="best-score">0</span></div>
+                <div class="stat">거리: <span id="distance">0</span></div>
+            </div>
+            <div id="heat-container">
+                <div class="label">추력 열</div>
+                <div id="heat-bar">
+                    <div id="heat-fill"></div>
+                </div>
+            </div>
+            <div id="controls">
+                <div>WASD/방향키: 추력</div>
+                <div>SPACE: 탈출(점수 확정)</div>
+                <div>R: 리셋</div>
+            </div>
+            <div id="status"></div>
+        </div>
     </div>
-    <div id="controls">
-      <div>WASD/방향키: 추력</div>
-      <div>Space: 캐시아웃(탈출)</div>
-      <div>Shift: 부스터</div>
-      <div>R: 리셋</div>
-    </div>
-    <div id="message"></div>
-  </div>
-  <canvas id="canvas"></canvas>
-  <script src="main.js"></script>
+    <script src="main.js"></script>
 </body>
 </html>
