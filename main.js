@@ -21,22 +21,22 @@ const PARAMS = {
     maxShake: 15,
     eps: 0.1,
     
-    starCount: 80,              // 별 개수 줄임
-    starSpawnMin: 500,          // 생성 범위 조정
-    starSpawnMax: 700,
-    starInitialSpeedMin: 40,    // 초기 속도 조정
+    starCount: 80,
+    starSpawnMin: 800,          // 화면 밖에서 시작
+    starSpawnMax: 1000,
+    starInitialSpeedMin: 40,
     starInitialSpeedMax: 70,
-    starTangentRatio: 0.8,      // 공전 느낌을 위해 접선 속도 증가
-    playerRadius: 10,
+    starTangentRatio: 0.8,
+    playerRadius: 12,           // UFO 크기
     starCollisionRadius: 3,
     
-    starBodySpawnInterval: 12000,  // 항성 생성 간격 늘림
-    starBodyProbability: 0.5,      // 생성 확률 낮춤
-    starBodyMaxCount: 1,           // 최대 1개만
+    starBodySpawnInterval: 12000,
+    starBodyProbability: 0.5,
+    starBodyMaxCount: 1,
     starBodyRadius: 18,
-    starBodyMass: 3000,            // 질량 감소
-    starBodySoftening: 300,        // 소프트닝 증가 (중력 약화)
-    GStar: 8000                    // 중력 상수 약화
+    starBodyMass: 2000,         // 항성 질량 더 감소
+    starBodySoftening: 400,     // 소프트닝 더 증가
+    GStar: 5000                 // 중력 상수 더 약화
 };
 
 let gameState = {
@@ -52,7 +52,8 @@ let gameState = {
     keys: {},
     lastTime: 0,
     lastStarBodySpawn: 0,
-    isRunning: false
+    isRunning: false,
+    starSpawnTimer: 0           // 별 생성 타이머
 };
 
 function init() {
@@ -61,7 +62,6 @@ function init() {
     gameState.lastStarBodySpawn = performance.now();
     resetRound();
     updateUI();
-    spawnStars();
     gameState.isRunning = true;
     requestAnimationFrame(gameLoop);
 }
@@ -77,14 +77,10 @@ function resetRound() {
     gameState.heat = 0;
     gameState.nearMissActivated = false;
     gameState.shake = { x: 0, y: 0 };
+    gameState.stars = [];           // 별 초기화
+    gameState.starBodies = [];      // 항성 초기화
+    gameState.starSpawnTimer = 0;
     document.getElementById('status').textContent = '';
-}
-
-function spawnStars() {
-    gameState.stars = [];
-    for (let i = 0; i < PARAMS.starCount; i++) {
-        spawnStar();
-    }
 }
 
 function spawnStar() {
@@ -93,8 +89,8 @@ function spawnStar() {
     const x = gameState.center.x + Math.cos(angle) * dist;
     const y = gameState.center.y + Math.sin(angle) * dist;
     
-    // 궤도 속도 계산 (공전하면서 빨려들어가는 느낌)
-    const orbitalSpeed = Math.sqrt(PARAMS.GM / dist) * 0.7; // 약간 느리게
+    // 궤도 속도 계산
+    const orbitalSpeed = Math.sqrt(PARAMS.GM / dist) * 0.7;
     const tangentAngle = angle + Math.PI / 2;
     
     // 안쪽으로 약간 당기는 radial 속도
@@ -106,7 +102,7 @@ function spawnStar() {
         vx: Math.cos(tangentAngle) * orbitalSpeed + Math.cos(angle) * radialSpeed,
         vy: Math.sin(tangentAngle) * orbitalSpeed + Math.sin(angle) * radialSpeed,
         size: 1 + Math.random() * 1.5,
-        brightness: 0.7 + Math.random() * 0.3  // 고정 밝기
+        brightness: 0.7 + Math.random() * 0.3
     });
 }
 
@@ -183,6 +179,13 @@ function update(dt) {
     const p = gameState.player;
     const c = gameState.center;
     
+    // 별 주기적으로 생성
+    gameState.starSpawnTimer += dt;
+    if (gameState.starSpawnTimer > 0.3 && gameState.stars.length < PARAMS.starCount) {
+        spawnStar();
+        gameState.starSpawnTimer = 0;
+    }
+    
     const dx = c.x - p.x;
     const dy = c.y - p.y;
     const r = Math.sqrt(dx * dx + dy * dy);
@@ -205,13 +208,13 @@ function update(dt) {
     let gravX = (dx / r) * gravMag;
     let gravY = (dy / r) * gravMag;
     
-    // 항성 중력 영향 (플레이어에게만, 약하게)
+    // 항성 중력 영향 (매우 약하게)
     gameState.starBodies.forEach(sb => {
         const sbdx = sb.x - p.x;
         const sbdy = sb.y - p.y;
         const sbr = Math.sqrt(sbdx * sbdx + sbdy * sbdy);
-        if (sbr > PARAMS.eps) {
-            const sbGravMag = (PARAMS.GStar * sb.mass) / (sbr * sbr + sb.softening);
+        if (sbr > PARAMS.eps && sbr < 200) { // 가까울 때만
+            const sbGravMag = (PARAMS.GStar * sb.mass * 0.1) / (sbr * sbr + sb.softening); // 매우 약하게
             gravX += (sbdx / sbr) * sbGravMag;
             gravY += (sbdy / sbr) * sbGravMag;
         }
@@ -223,19 +226,19 @@ function update(dt) {
     
     if (gameState.heat < 1.0) {
         if (gameState.keys['w'] || gameState.keys['arrowup']) {
-            thrustY -= PARAMS.thrustForce;
+            thrustY -= PARAMS.thrustForce;  // 위로
             thrusting = true;
         }
         if (gameState.keys['s'] || gameState.keys['arrowdown']) {
-            thrustY += PARAMS.thrustForce;
+            thrustY += PARAMS.thrustForce;  // 아래로
             thrusting = true;
         }
         if (gameState.keys['a'] || gameState.keys['arrowleft']) {
-            thrustX -= PARAMS.thrustForce;
+            thrustX -= PARAMS.thrustForce;  // 왼쪽으로
             thrusting = true;
         }
         if (gameState.keys['d'] || gameState.keys['arrowright']) {
-            thrustX += PARAMS.thrustForce;
+            thrustX += PARAMS.thrustForce;  // 오른쪽으로
             thrusting = true;
         }
     }
@@ -268,10 +271,8 @@ function update(dt) {
         const sdy = c.y - star.y;
         const sr = Math.sqrt(sdx * sdx + sdy * sdy);
         
-        // 블랙홀에 닿으면 소멸
         if (sr <= PARAMS.r_s) {
             gameState.stars.splice(i, 1);
-            spawnStar();
             continue;
         }
         
@@ -284,13 +285,13 @@ function update(dt) {
             sGravY = (sdy / sr) * sGravMag;
         }
         
-        // 항성 중력 영향 (별에게만, 약하게 - 궤도만 살짝 휘도록)
+        // 항성 중력 영향 (별에게만, 매우 약하게)
         gameState.starBodies.forEach(sb => {
             const sbdx = sb.x - star.x;
             const sbdy = sb.y - star.y;
             const sbr = Math.sqrt(sbdx * sbdx + sbdy * sbdy);
-            if (sbr > PARAMS.eps && sbr < 300) { // 가까울 때만 영향
-                const sbGravMag = (PARAMS.GStar * sb.mass * 0.3) / (sbr * sbr + sb.softening); // 더 약하게
+            if (sbr > PARAMS.eps && sbr < 250) {
+                const sbGravMag = (PARAMS.GStar * sb.mass * 0.15) / (sbr * sbr + sb.softening);
                 sGravX += (sbdx / sbr) * sbGravMag;
                 sGravY += (sbdy / sbr) * sbGravMag;
             }
@@ -324,12 +325,12 @@ function update(dt) {
         const sbdy = c.y - sb.y;
         const sbr = Math.sqrt(sbdx * sbdx + sbdy * sbdy);
         
-        // 블랙홀에 닿으면 소멸
         if (sbr <= PARAMS.r_s) {
             gameState.starBodies.splice(i, 1);
             continue;
         }
         
+        // 항성은 블랙홀 중력만 받음
         if (sbr > PARAMS.eps) {
             const sbGravMag = PARAMS.GM / (sbr * sbr + PARAMS.softening);
             sb.vx += (sbdx / sbr) * sbGravMag * dt;
@@ -354,7 +355,7 @@ function render() {
     const c = gameState.center;
     const p = gameState.player;
     
-    // 작은 별들 (깜빡임 없음)
+    // 작은 별들
     gameState.stars.forEach(star => {
         ctx.fillStyle = `rgba(200, 220, 255, ${star.brightness})`;
         ctx.beginPath();
@@ -397,43 +398,77 @@ function render() {
     ctx.arc(c.x, c.y, PARAMS.r_s, 0, Math.PI * 2);
     ctx.stroke();
     
-    // 위험 구간
-    ctx.strokeStyle = '#ff0';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, PARAMS.r_s + PARAMS.nearMissWindow, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    
-    // 플레이어
+    // UFO 플레이어
     const dx = p.x - c.x;
     const dy = p.y - c.y;
     const angle = Math.atan2(dy, dx);
     
     ctx.save();
     ctx.translate(p.x, p.y);
-    ctx.rotate(angle + Math.PI / 2);
     
-    ctx.fillStyle = '#0ff';
+    // UFO 몸체 (원형)
+    const ufoGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, PARAMS.playerRadius);
+    ufoGradient.addColorStop(0, '#0ff');
+    ufoGradient.addColorStop(0.7, '#088');
+    ufoGradient.addColorStop(1, '#044');
+    ctx.fillStyle = ufoGradient;
     ctx.beginPath();
-    ctx.moveTo(0, -10);
-    ctx.lineTo(-6, 10);
-    ctx.lineTo(6, 10);
-    ctx.closePath();
+    ctx.arc(0, 0, PARAMS.playerRadius, 0, Math.PI * 2);
     ctx.fill();
     
-    if (gameState.heat < 1.0 && (gameState.keys['w'] || gameState.keys['s'] || 
-        gameState.keys['a'] || gameState.keys['d'] ||
-        gameState.keys['arrowup'] || gameState.keys['arrowdown'] ||
-        gameState.keys['arrowleft'] || gameState.keys['arrowright'])) {
+    // UFO 테두리
+    ctx.strokeStyle = '#0ff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, PARAMS.playerRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    
+    // UFO 창문
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(0, 0, PARAMS.playerRadius * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // 추력 분사 (4방향)
+    if (gameState.heat < 1.0) {
         ctx.fillStyle = '#f80';
-        ctx.beginPath();
-        ctx.moveTo(-3, 10);
-        ctx.lineTo(0, 20);
-        ctx.lineTo(3, 10);
-        ctx.closePath();
-        ctx.fill();
+        
+        if (gameState.keys['w'] || gameState.keys['arrowup']) {
+            // 아래로 분사
+            ctx.beginPath();
+            ctx.moveTo(-4, PARAMS.playerRadius);
+            ctx.lineTo(0, PARAMS.playerRadius + 12);
+            ctx.lineTo(4, PARAMS.playerRadius);
+            ctx.closePath();
+            ctx.fill();
+        }
+        if (gameState.keys['s'] || gameState.keys['arrowdown']) {
+            // 위로 분사
+            ctx.beginPath();
+            ctx.moveTo(-4, -PARAMS.playerRadius);
+            ctx.lineTo(0, -PARAMS.playerRadius - 12);
+            ctx.lineTo(4, -PARAMS.playerRadius);
+            ctx.closePath();
+            ctx.fill();
+        }
+        if (gameState.keys['a'] || gameState.keys['arrowleft']) {
+            // 오른쪽으로 분사
+            ctx.beginPath();
+            ctx.moveTo(PARAMS.playerRadius, -4);
+            ctx.lineTo(PARAMS.playerRadius + 12, 0);
+            ctx.lineTo(PARAMS.playerRadius, 4);
+            ctx.closePath();
+            ctx.fill();
+        }
+        if (gameState.keys['d'] || gameState.keys['arrowright']) {
+            // 왼쪽으로 분사
+            ctx.beginPath();
+            ctx.moveTo(-PARAMS.playerRadius, -4);
+            ctx.lineTo(-PARAMS.playerRadius - 12, 0);
+            ctx.lineTo(-PARAMS.playerRadius, 4);
+            ctx.closePath();
+            ctx.fill();
+        }
     }
     
     ctx.restore();
