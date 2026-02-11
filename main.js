@@ -6,42 +6,39 @@ canvas.height = 800;
 
 // === 튜닝 파라미터 ===
 const PARAMS = {
-    GM: 50000,              // 블랙홀 중력 상수
-    softening: 100,         // 블랙홀 중력 소프트닝
-    r_s: 80,                // 사건의 지평선 반경
-    thrustForce: 200,       // 추력 강도
-    scoreScale: 100,        // 점수 배율 스케일
-    multMax: 50,            // 최대 멀티플라이어
-    baseRate: 10,           // 기본 점수 증가율
-    heatRate: 0.4,          // 열 증가율
-    coolRate: 0.15,         // 열 감소율
-    nearMissWindow: 30,     // 위험 구간 폭
-    nearMissBonus: 3.0,     // Near Miss 보너스 배율
-    shakeScale: 500,        // 화면 흔들림 스케일
-    maxShake: 15,           // 최대 흔들림
-    eps: 0.1,               // 안전 엡silon
+    GM: 50000,
+    softening: 100,
+    r_s: 80,
+    thrustForce: 200,
+    scoreScale: 100,
+    multMax: 50,
+    baseRate: 10,
+    heatRate: 0.4,
+    coolRate: 0.15,
+    nearMissWindow: 30,
+    nearMissBonus: 3.0,
+    shakeScale: 500,
+    maxShake: 15,
+    eps: 0.1,
     
-    // 별 시스템 파라미터
-    starCount: 200,         // 작은 별 개수
-    starSpawnMin: 650,      // 별 생성 최소 반경
-    starSpawnMax: 900,      // 별 생성 최대 반경
-    starInitialSpeedMin: 30,  // 별 초기 속도 최소
-    starInitialSpeedMax: 80,  // 별 초기 속도 최대
-    starTangentRatio: 0.3,    // 접선 속도 비율
-    playerRadius: 10,         // 플레이어 충돌 반경
-    starCollisionRadius: 3,   // 별 충돌 반경
+    starCount: 200,
+    starSpawnMin: 650,
+    starSpawnMax: 900,
+    starInitialSpeedMin: 30,
+    starInitialSpeedMax: 80,
+    starTangentRatio: 0.3,
+    playerRadius: 10,
+    starCollisionRadius: 3,
     
-    // 항성 파라미터
-    starBodySpawnInterval: 10000,  // 항성 생성 간격(ms)
-    starBodyProbability: 0.6,      // 항성 생성 확률
-    starBodyMaxCount: 2,           // 최대 항성 개수
-    starBodyRadius: 15,            // 항성 반경
-    starBodyMass: 5000,            // 항성 질량
-    starBodySoftening: 200,        // 항성 중력 소프트닝
-    GStar: 15000                   // 항성 중력 상수 (블랙홀보다 약함)
+    starBodySpawnInterval: 10000,
+    starBodyProbability: 0.6,
+    starBodyMaxCount: 2,
+    starBodyRadius: 15,
+    starBodyMass: 5000,
+    starBodySoftening: 200,
+    GStar: 15000
 };
 
-// === 게임 상태 ===
 let gameState = {
     center: { x: canvas.width / 2, y: canvas.height / 2 },
     player: { x: 0, y: 0, vx: 0, vy: 0 },
@@ -50,20 +47,23 @@ let gameState = {
     heat: 0,
     nearMissActivated: false,
     shake: { x: 0, y: 0 },
-    stars: [],           // 작은 별들
-    starBodies: [],      // 항성들
+    stars: [],
+    starBodies: [],
     keys: {},
-    lastTime: performance.now(),
-    lastStarBodySpawn: performance.now()
+    lastTime: 0,
+    lastStarBodySpawn: 0,
+    isRunning: false
 };
 
-// === 초기화 ===
 function init() {
     gameState.bestScore = parseFloat(localStorage.getItem('eventHorizonBest')) || 0;
+    gameState.lastTime = performance.now();
+    gameState.lastStarBodySpawn = performance.now();
     resetRound();
     updateUI();
     spawnStars();
-    gameLoop();
+    gameState.isRunning = true;
+    requestAnimationFrame(gameLoop);
 }
 
 function resetRound() {
@@ -93,7 +93,6 @@ function spawnStar() {
     const x = gameState.center.x + Math.cos(angle) * dist;
     const y = gameState.center.y + Math.sin(angle) * dist;
     
-    // 초기 속도: 블랙홀 방향 + 접선 성분
     const speed = PARAMS.starInitialSpeedMin + Math.random() * (PARAMS.starInitialSpeedMax - PARAMS.starInitialSpeedMin);
     const radialVx = -Math.cos(angle) * speed;
     const radialVy = -Math.sin(angle) * speed;
@@ -121,7 +120,6 @@ function trySpawnStarBody(now) {
     const x = gameState.center.x + Math.cos(angle) * dist;
     const y = gameState.center.y + Math.sin(angle) * dist;
     
-    // 항성 초기 속도 (약간의 궤도 운동)
     const speed = 40 + Math.random() * 30;
     const tangentAngle = angle + Math.PI / 2;
     
@@ -142,7 +140,6 @@ function trySpawnStarBody(now) {
     gameState.lastStarBodySpawn = now;
 }
 
-// === 입력 처리 ===
 document.addEventListener('keydown', (e) => {
     gameState.keys[e.key.toLowerCase()] = true;
     
@@ -179,34 +176,34 @@ function escapeRound() {
     setTimeout(() => resetRound(), 1000);
 }
 
-// === 물리 업데이트 ===
 function update(dt) {
+    if (!gameState.isRunning) return;
+    
     const p = gameState.player;
     const c = gameState.center;
     
-    // 거리 계산
     const dx = c.x - p.x;
     const dy = c.y - p.y;
     const r = Math.sqrt(dx * dx + dy * dy);
     
-    // 사건의 지평선 체크
     if (r <= PARAMS.r_s) {
         document.getElementById('status').textContent = '흡수됨! 점수 손실';
-        setTimeout(() => resetRound(), 1000);
+        gameState.isRunning = false;
+        setTimeout(() => {
+            gameState.isRunning = true;
+            resetRound();
+        }, 1000);
         return;
     }
     
-    // Near Miss 체크
     if (r <= PARAMS.r_s + PARAMS.nearMissWindow) {
         gameState.nearMissActivated = true;
     }
     
-    // 블랙홀 중력 계산
     const gravMag = PARAMS.GM / (r * r + PARAMS.softening);
     let gravX = (dx / r) * gravMag;
     let gravY = (dy / r) * gravMag;
     
-    // 항성 중력 영향 (플레이어에게)
     gameState.starBodies.forEach(sb => {
         const sbdx = sb.x - p.x;
         const sbdy = sb.y - p.y;
@@ -218,7 +215,6 @@ function update(dt) {
         }
     });
     
-    // 추력 계산
     let thrustX = 0;
     let thrustY = 0;
     let thrusting = false;
@@ -242,7 +238,6 @@ function update(dt) {
         }
     }
     
-    // 열 관리
     if (thrusting) {
         gameState.heat += PARAMS.heatRate * dt;
     } else {
@@ -250,27 +245,22 @@ function update(dt) {
     }
     gameState.heat = Math.max(0, Math.min(1, gameState.heat));
     
-    // Semi-implicit Euler
     p.vx += (gravX + thrustX) * dt;
     p.vy += (gravY + thrustY) * dt;
     p.x += p.vx * dt;
     p.y += p.vy * dt;
     
-    // 점수 계산
     const d = Math.max(r - PARAMS.r_s, PARAMS.eps);
     const multiplier = Math.min(PARAMS.scoreScale / d, PARAMS.multMax);
     gameState.score += PARAMS.baseRate * multiplier * dt;
     
-    // 화면 흔들림
     const shakeIntensity = Math.min(PARAMS.shakeScale / (r - PARAMS.r_s + PARAMS.eps), PARAMS.maxShake);
     gameState.shake.x = (Math.random() - 0.5) * shakeIntensity;
     gameState.shake.y = (Math.random() - 0.5) * shakeIntensity;
     
-    // 별 업데이트
     for (let i = gameState.stars.length - 1; i >= 0; i--) {
         const star = gameState.stars[i];
         
-        // 블랙홀 중력
         const sdx = c.x - star.x;
         const sdy = c.y - star.y;
         const sr = Math.sqrt(sdx * sdx + sdy * sdy);
@@ -290,7 +280,6 @@ function update(dt) {
             sGravY = (sdy / sr) * sGravMag;
         }
         
-        // 항성 중력 영향
         gameState.starBodies.forEach(sb => {
             const sbdx = sb.x - star.x;
             const sbdy = sb.y - star.y;
@@ -309,22 +298,23 @@ function update(dt) {
         
         star.twinkle += star.twinkleSpeed * dt;
         
-        // 플레이어 충돌 체크
         const pdx = p.x - star.x;
         const pdy = p.y - star.y;
         const pDist = Math.sqrt(pdx * pdx + pdy * pdy);
         if (pDist < PARAMS.playerRadius + PARAMS.starCollisionRadius) {
             document.getElementById('status').textContent = '⭐ 별 충돌!';
-            setTimeout(() => resetRound(), 800);
+            gameState.isRunning = false;
+            setTimeout(() => {
+                gameState.isRunning = true;
+                resetRound();
+            }, 800);
             return;
         }
     }
     
-    // 항성 업데이트
     for (let i = gameState.starBodies.length - 1; i >= 0; i--) {
         const sb = gameState.starBodies[i];
         
-        // 블랙홀 중력
         const sbdx = c.x - sb.x;
         const sbdy = c.y - sb.y;
         const sbr = Math.sqrt(sbdx * sbdx + sbdy * sbdy);
@@ -348,7 +338,6 @@ function update(dt) {
     updateUI();
 }
 
-// === 렌더링 ===
 function render() {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -359,7 +348,6 @@ function render() {
     const c = gameState.center;
     const p = gameState.player;
     
-    // 작은 별들
     gameState.stars.forEach(star => {
         const alpha = 0.5 + Math.sin(star.twinkle) * 0.3;
         const hue = 200 + Math.random() * 40;
@@ -369,7 +357,6 @@ function render() {
         ctx.fill();
     });
     
-    // 항성들
     gameState.starBodies.forEach(sb => {
         const glowSize = sb.radius + 10 + Math.sin(sb.glow) * 5;
         const gradient = ctx.createRadialGradient(sb.x, sb.y, 0, sb.x, sb.y, glowSize);
@@ -388,7 +375,6 @@ function render() {
         ctx.fill();
     });
     
-    // 블랙홀
     const gradient = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, PARAMS.r_s);
     gradient.addColorStop(0, '#000');
     gradient.addColorStop(1, '#111');
@@ -397,14 +383,12 @@ function render() {
     ctx.arc(c.x, c.y, PARAMS.r_s, 0, Math.PI * 2);
     ctx.fill();
     
-    // 사건의 지평선
     ctx.strokeStyle = '#f00';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(c.x, c.y, PARAMS.r_s, 0, Math.PI * 2);
     ctx.stroke();
     
-    // 위험 구간
     ctx.strokeStyle = '#ff0';
     ctx.lineWidth = 1;
     ctx.setLineDash([5, 5]);
@@ -413,7 +397,6 @@ function render() {
     ctx.stroke();
     ctx.setLineDash([]);
     
-    // 플레이어
     const dx = p.x - c.x;
     const dy = p.y - c.y;
     const angle = Math.atan2(dy, dx);
@@ -447,7 +430,6 @@ function render() {
     ctx.restore();
 }
 
-// === UI 업데이트 ===
 function updateUI() {
     const p = gameState.player;
     const c = gameState.center;
@@ -461,11 +443,10 @@ function updateUI() {
     document.getElementById('heat-fill').style.width = (gameState.heat * 100) + '%';
 }
 
-// === 게임 루프 ===
 function gameLoop() {
     const now = performance.now();
     let dt = (now - gameState.lastTime) / 1000;
-    dt = Math.min(dt, 0.05); // dt 클램핑
+    dt = Math.min(dt, 0.05);
     gameState.lastTime = now;
     
     trySpawnStarBody(now);
