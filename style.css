@@ -1,75 +1,97 @@
 * {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
 }
 
 body {
-  overflow: hidden;
-  background: #000;
-  font-family: 'Courier New', monospace;
-  color: #0f0;
+    background: #000;
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+    color: #fff;
 }
 
-#canvas {
-  display: block;
-  background: radial-gradient(circle at center, #000814 0%, #000000 100%);
+#game-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#gameCanvas {
+    display: block;
+    background: #000;
 }
 
 #ui {
-  position: absolute;
-  top: 20px;
-  left: 20px;
-  z-index: 10;
-  pointer-events: none;
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    pointer-events: none;
 }
 
-#stats {
-  background: rgba(0, 0, 0, 0.7);
-  padding: 15px;
-  border: 2px solid #0f0;
-  border-radius: 5px;
-  margin-bottom: 15px;
-  font-size: 14px;
-  line-height: 1.6;
+#score-panel {
+    background: rgba(0, 0, 0, 0.7);
+    padding: 15px;
+    border: 2px solid #0ff;
+    margin-bottom: 15px;
 }
 
-#stats div {
-  margin: 3px 0;
+.stat {
+    font-size: 18px;
+    margin: 5px 0;
+    color: #0ff;
 }
 
-#stats span {
-  color: #0ff;
-  font-weight: bold;
+#heat-container {
+    background: rgba(0, 0, 0, 0.7);
+    padding: 10px;
+    border: 2px solid #f80;
+    margin-bottom: 15px;
+}
+
+.label {
+    font-size: 14px;
+    margin-bottom: 5px;
+    color: #f80;
+}
+
+#heat-bar {
+    width: 200px;
+    height: 20px;
+    background: #333;
+    border: 1px solid #666;
+    position: relative;
+    overflow: hidden;
+}
+
+#heat-fill {
+    height: 100%;
+    background: linear-gradient(to right, #ff0, #f00);
+    width: 0%;
+    transition: width 0.1s;
 }
 
 #controls {
-  background: rgba(0, 0, 0, 0.7);
-  padding: 10px;
-  border: 2px solid #0f0;
-  border-radius: 5px;
-  font-size: 12px;
-  line-height: 1.5;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 10px;
+    border: 2px solid #888;
+    font-size: 12px;
+    margin-bottom: 15px;
 }
 
-#message {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: rgba(0, 0, 0, 0.9);
-  padding: 30px 50px;
-  border: 3px solid #f00;
-  border-radius: 10px;
-  font-size: 24px;
-  color: #f00;
-  text-align: center;
-  display: none;
-  pointer-events: none;
-  animation: pulse 0.5s ease-in-out;
+#controls div {
+    margin: 3px 0;
+    color: #aaa;
 }
 
-@keyframes pulse {
-  0%, 100% { transform: translate(-50%, -50%) scale(1); }
-  50% { transform: translate(-50%, -50%) scale(1.1); }
+#status {
+    background: rgba(0, 0, 0, 0.9);
+    padding: 10px;
+    border: 2px solid #0f0;
+    font-size: 16px;
+    color: #0f0;
+    min-height: 30px;
 }
