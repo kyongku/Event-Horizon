@@ -6,7 +6,7 @@ canvas.height = 800;
 
 // === 튜닝 파라미터 ===
 const PARAMS = {
-    GM: 100000,
+    GM: 150000,
     softening: 100,
     r_s: 80,
     thrustForce: 200,
@@ -19,7 +19,7 @@ const PARAMS = {
     nearMissBonus: 3.0,
     shakeScale: 500,
     maxShake: 15,
-    eps: 0.6,
+    eps: 1.0,
     
     starCount: 80,
     starSpawnMin: 800,
@@ -30,7 +30,7 @@ const PARAMS = {
     playerRadius: 12,
     starCollisionRadius: 3,
     
-    starBodySpawnInterval: 12000,
+    starBodySpawnInterval: 1000,
     starBodyProbability: 0.5,
     starBodyMaxCount: 1,
     starBodyRadius: 18,
