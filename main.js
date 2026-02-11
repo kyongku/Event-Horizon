@@ -22,21 +22,24 @@ const PARAMS = {
     eps: 0.1,
     
     starCount: 80,
-    starSpawnMin: 800,          // 화면 밖에서 시작
+    starSpawnMin: 800,
     starSpawnMax: 1000,
     starInitialSpeedMin: 40,
     starInitialSpeedMax: 70,
     starTangentRatio: 0.8,
-    playerRadius: 12,           // UFO 크기
+    playerRadius: 12,
     starCollisionRadius: 3,
     
     starBodySpawnInterval: 12000,
     starBodyProbability: 0.5,
     starBodyMaxCount: 1,
     starBodyRadius: 18,
-    starBodyMass: 2000,         // 항성 질량 더 감소
-    starBodySoftening: 400,     // 소프트닝 더 증가
-    GStar: 5000                 // 중력 상수 더 약화
+    starBodyMass: 2000,
+    starBodySoftening: 400,
+    GStar: 5000,
+    
+    // 화면 경계
+    screenMargin: 200  // 화면 밖 여유 공간
 };
 
 let gameState = {
@@ -53,7 +56,7 @@ let gameState = {
     lastTime: 0,
     lastStarBodySpawn: 0,
     isRunning: false,
-    starSpawnTimer: 0           // 별 생성 타이머
+    starSpawnTimer: 0
 };
 
 function init() {
@@ -77,10 +80,18 @@ function resetRound() {
     gameState.heat = 0;
     gameState.nearMissActivated = false;
     gameState.shake = { x: 0, y: 0 };
-    gameState.stars = [];           // 별 초기화
-    gameState.starBodies = [];      // 항성 초기화
+    gameState.stars = [];
+    gameState.starBodies = [];
     gameState.starSpawnTimer = 0;
     document.getElementById('status').textContent = '';
+}
+
+// 화면 밖인지 체크
+function isOutOfBounds(x, y) {
+    return x < -PARAMS.screenMargin || 
+           x > canvas.width + PARAMS.screenMargin || 
+           y < -PARAMS.screenMargin || 
+           y > canvas.height + PARAMS.screenMargin;
 }
 
 function spawnStar() {
@@ -116,17 +127,23 @@ function trySpawnStarBody(now) {
     const x = gameState.center.x + Math.cos(angle) * dist;
     const y = gameState.center.y + Math.sin(angle) * dist;
     
-    // 항성도 공전 궤도
-    const orbitalSpeed = Math.sqrt(PARAMS.GM / dist) * 0.6;
+    // 항성 초기 속도 - 블랙홀 쪽으로 향하도록
+    const towardCenterX = gameState.center.x - x;
+    const towardCenterY = gameState.center.y - y;
+    const distToCenter = Math.sqrt(towardCenterX * towardCenterX + towardCenterY * towardCenterY);
+    
+    // 궤도 속도 + 약간의 radial 속도
+    const orbitalSpeed = Math.sqrt(PARAMS.GM / distToCenter) * 0.6;
     const tangentAngle = angle + Math.PI / 2;
+    const radialSpeed = 20; // 블랙홀로 향하는 속도
     
     const colors = ['#ffaa00', '#ff6600', '#ff9933', '#ffcc66'];
     
     gameState.starBodies.push({
         x: x,
         y: y,
-        vx: Math.cos(tangentAngle) * orbitalSpeed,
-        vy: Math.sin(tangentAngle) * orbitalSpeed,
+        vx: Math.cos(tangentAngle) * orbitalSpeed + (towardCenterX / distToCenter) * radialSpeed,
+        vy: Math.sin(tangentAngle) * orbitalSpeed + (towardCenterY / distToCenter) * radialSpeed,
         radius: PARAMS.starBodyRadius,
         mass: PARAMS.starBodyMass,
         softening: PARAMS.starBodySoftening,
@@ -190,6 +207,17 @@ function update(dt) {
     const dy = c.y - p.y;
     const r = Math.sqrt(dx * dx + dy * dy);
     
+    // 플레이어가 화면 밖으로 나가면
+    if (isOutOfBounds(p.x, p.y)) {
+        document.getElementById('status').textContent = '화면 밖으로 이탈!';
+        gameState.isRunning = false;
+        setTimeout(() => {
+            gameState.isRunning = true;
+            resetRound();
+        }, 1000);
+        return;
+    }
+    
     if (r <= PARAMS.r_s) {
         document.getElementById('status').textContent = '흡수됨! 점수 손실';
         gameState.isRunning = false;
@@ -208,15 +236,17 @@ function update(dt) {
     let gravX = (dx / r) * gravMag;
     let gravY = (dy / r) * gravMag;
     
-    // 항성 중력 영향 (매우 약하게)
+    // 항성 중력 영향 (화면 안에 있는 항성만)
     gameState.starBodies.forEach(sb => {
-        const sbdx = sb.x - p.x;
-        const sbdy = sb.y - p.y;
-        const sbr = Math.sqrt(sbdx * sbdx + sbdy * sbdy);
-        if (sbr > PARAMS.eps && sbr < 200) { // 가까울 때만
-            const sbGravMag = (PARAMS.GStar * sb.mass * 0.1) / (sbr * sbr + sb.softening); // 매우 약하게
-            gravX += (sbdx / sbr) * sbGravMag;
-            gravY += (sbdy / sbr) * sbGravMag;
+        if (!isOutOfBounds(sb.x, sb.y)) {
+            const sbdx = sb.x - p.x;
+            const sbdy = sb.y - p.y;
+            const sbr = Math.sqrt(sbdx * sbdx + sbdy * sbdy);
+            if (sbr > PARAMS.eps && sbr < 200) {
+                const sbGravMag = (PARAMS.GStar * sb.mass * 0.1) / (sbr * sbr + sb.softening);
+                gravX += (sbdx / sbr) * sbGravMag;
+                gravY += (sbdy / sbr) * sbGravMag;
+            }
         }
     });
     
@@ -226,19 +256,19 @@ function update(dt) {
     
     if (gameState.heat < 1.0) {
         if (gameState.keys['w'] || gameState.keys['arrowup']) {
-            thrustY -= PARAMS.thrustForce;  // 위로
+            thrustY -= PARAMS.thrustForce;
             thrusting = true;
         }
         if (gameState.keys['s'] || gameState.keys['arrowdown']) {
-            thrustY += PARAMS.thrustForce;  // 아래로
+            thrustY += PARAMS.thrustForce;
             thrusting = true;
         }
         if (gameState.keys['a'] || gameState.keys['arrowleft']) {
-            thrustX -= PARAMS.thrustForce;  // 왼쪽으로
+            thrustX -= PARAMS.thrustForce;
             thrusting = true;
         }
         if (gameState.keys['d'] || gameState.keys['arrowright']) {
-            thrustX += PARAMS.thrustForce;  // 오른쪽으로
+            thrustX += PARAMS.thrustForce;
             thrusting = true;
         }
     }
@@ -267,6 +297,12 @@ function update(dt) {
     for (let i = gameState.stars.length - 1; i >= 0; i--) {
         const star = gameState.stars[i];
         
+        // 화면 밖으로 나가면 제거
+        if (isOutOfBounds(star.x, star.y)) {
+            gameState.stars.splice(i, 1);
+            continue;
+        }
+        
         const sdx = c.x - star.x;
         const sdy = c.y - star.y;
         const sr = Math.sqrt(sdx * sdx + sdy * sdy);
@@ -279,21 +315,24 @@ function update(dt) {
         let sGravX = 0;
         let sGravY = 0;
         
+        // 블랙홀 중력
         if (sr > PARAMS.eps) {
             const sGravMag = PARAMS.GM / (sr * sr + PARAMS.softening);
             sGravX = (sdx / sr) * sGravMag;
             sGravY = (sdy / sr) * sGravMag;
         }
         
-        // 항성 중력 영향 (별에게만, 매우 약하게)
+        // 항성 중력 영향 (화면 안에 있는 항성만)
         gameState.starBodies.forEach(sb => {
-            const sbdx = sb.x - star.x;
-            const sbdy = sb.y - star.y;
-            const sbr = Math.sqrt(sbdx * sbdx + sbdy * sbdy);
-            if (sbr > PARAMS.eps && sbr < 250) {
-                const sbGravMag = (PARAMS.GStar * sb.mass * 0.15) / (sbr * sbr + sb.softening);
-                sGravX += (sbdx / sbr) * sbGravMag;
-                sGravY += (sbdy / sbr) * sbGravMag;
+            if (!isOutOfBounds(sb.x, sb.y)) {
+                const sbdx = sb.x - star.x;
+                const sbdy = sb.y - star.y;
+                const sbr = Math.sqrt(sbdx * sbdx + sbdy * sbdy);
+                if (sbr > PARAMS.eps && sbr < 250) {
+                    const sbGravMag = (PARAMS.GStar * sb.mass * 0.15) / (sbr * sbr + sb.softening);
+                    sGravX += (sbdx / sbr) * sbGravMag;
+                    sGravY += (sbdy / sbr) * sbGravMag;
+                }
             }
         });
         
@@ -320,6 +359,12 @@ function update(dt) {
     // 항성 업데이트
     for (let i = gameState.starBodies.length - 1; i >= 0; i--) {
         const sb = gameState.starBodies[i];
+        
+        // 화면 밖으로 나가면 제거
+        if (isOutOfBounds(sb.x, sb.y)) {
+            gameState.starBodies.splice(i, 1);
+            continue;
+        }
         
         const sbdx = c.x - sb.x;
         const sbdy = c.y - sb.y;
@@ -401,7 +446,6 @@ function render() {
     // UFO 플레이어
     const dx = p.x - c.x;
     const dy = p.y - c.y;
-    const angle = Math.atan2(dy, dx);
     
     ctx.save();
     ctx.translate(p.x, p.y);
@@ -434,7 +478,6 @@ function render() {
         ctx.fillStyle = '#f80';
         
         if (gameState.keys['w'] || gameState.keys['arrowup']) {
-            // 아래로 분사
             ctx.beginPath();
             ctx.moveTo(-4, PARAMS.playerRadius);
             ctx.lineTo(0, PARAMS.playerRadius + 12);
@@ -443,7 +486,6 @@ function render() {
             ctx.fill();
         }
         if (gameState.keys['s'] || gameState.keys['arrowdown']) {
-            // 위로 분사
             ctx.beginPath();
             ctx.moveTo(-4, -PARAMS.playerRadius);
             ctx.lineTo(0, -PARAMS.playerRadius - 12);
@@ -452,7 +494,6 @@ function render() {
             ctx.fill();
         }
         if (gameState.keys['a'] || gameState.keys['arrowleft']) {
-            // 오른쪽으로 분사
             ctx.beginPath();
             ctx.moveTo(PARAMS.playerRadius, -4);
             ctx.lineTo(PARAMS.playerRadius + 12, 0);
@@ -461,7 +502,6 @@ function render() {
             ctx.fill();
         }
         if (gameState.keys['d'] || gameState.keys['arrowright']) {
-            // 왼쪽으로 분사
             ctx.beginPath();
             ctx.moveTo(-PARAMS.playerRadius, -4);
             ctx.lineTo(-PARAMS.playerRadius - 12, 0);
