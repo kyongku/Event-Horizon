@@ -1,491 +1,478 @@
-// ===== 튜닝 파라미터 =====
-const PARAMS = {
-  // 블랙홀
-  blackHoleMass: 50000,
-  eventHorizon: 50,
-  softening: 100,
-  
-  // 점수 시스템
-  scoreRadius: 400,
-  baseScoreRate: 10,
-  scoreScale: 100,
-  maxMultiplier: 20,
-  nearMissWindow: 80,
-  nearMissBonus: 2.5,
-  
-  // 플레이어
-  playerRadius: 8,
-  playerMass: 10,
-  thrustPower: 180,
-  boostMultiplier: 2.5,
-  maxSpeed: 400,
-  heatPerThrust: 0.8,
-  heatPerBoost: 2.5,
-  heatCoolRate: 15,
-  maxHeat: 100,
-  collisionPenalty: 50,
-  invincibilityTime: 0.5,
-  
-  // 소행성
-  asteroidCount: 25,
-  asteroidMinRadius: 4,
-  asteroidMaxRadius: 12,
-  asteroidMinMass: 5,
-  asteroidMaxMass: 20,
-  asteroidSpawnMin: 250,
-  asteroidSpawnMax: 500,
-  
-  // 거대 천체
-  planets: [
-    { x: 300, y: 0, mass: 8000, radius: 25, color: '#f4a460' },
-    { x: -200, y: 250, mass: 6000, radius: 20, color: '#4169e1' }
-  ],
-  
-  // 물리
-  G: 1,
-  maxDT: 0.05,
-  dampingFactor: 0.995
-};
-
-// ===== 게임 상태 =====
-const canvas = document.getElementById('canvas');
+const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
-let W, H, centerX, centerY;
+canvas.width = 1200;
+canvas.height = 800;
 
-const state = {
-  player: null,
-  asteroids: [],
-  round: 1,
-  currentScore: 0,
-  totalScore: 0,
-  heat: 0,
-  invincible: 0,
-  gameOver: false,
-  message: '',
-  keys: {},
-  lastTime: 0
+// === 튜닝 파라미터 ===
+const PARAMS = {
+    GM: 50000,              // 블랙홀 중력 상수
+    softening: 100,         // 블랙홀 중력 소프트닝
+    r_s: 80,                // 사건의 지평선 반경
+    thrustForce: 200,       // 추력 강도
+    scoreScale: 100,        // 점수 배율 스케일
+    multMax: 50,            // 최대 멀티플라이어
+    baseRate: 10,           // 기본 점수 증가율
+    heatRate: 0.4,          // 열 증가율
+    coolRate: 0.15,         // 열 감소율
+    nearMissWindow: 30,     // 위험 구간 폭
+    nearMissBonus: 3.0,     // Near Miss 보너스 배율
+    shakeScale: 500,        // 화면 흔들림 스케일
+    maxShake: 15,           // 최대 흔들림
+    eps: 0.1,               // 안전 엡silon
+    
+    // 별 시스템 파라미터
+    starCount: 200,         // 작은 별 개수
+    starSpawnMin: 650,      // 별 생성 최소 반경
+    starSpawnMax: 900,      // 별 생성 최대 반경
+    starInitialSpeedMin: 30,  // 별 초기 속도 최소
+    starInitialSpeedMax: 80,  // 별 초기 속도 최대
+    starTangentRatio: 0.3,    // 접선 속도 비율
+    playerRadius: 10,         // 플레이어 충돌 반경
+    starCollisionRadius: 3,   // 별 충돌 반경
+    
+    // 항성 파라미터
+    starBodySpawnInterval: 10000,  // 항성 생성 간격(ms)
+    starBodyProbability: 0.6,      // 항성 생성 확률
+    starBodyMaxCount: 2,           // 최대 항성 개수
+    starBodyRadius: 15,            // 항성 반경
+    starBodyMass: 5000,            // 항성 질량
+    starBodySoftening: 200,        // 항성 중력 소프트닝
+    GStar: 15000                   // 항성 중력 상수 (블랙홀보다 약함)
 };
 
-// ===== 초기화 =====
-function init() {
-  resizeCanvas();
-  window.addEventListener('resize', resizeCanvas);
-  window.addEventListener('keydown', e => {
-    state.keys[e.code] = true;
-    if (e.code === 'Space') {
-      e.preventDefault();
-      cashOut();
-    }
-    if (e.code === 'KeyR') {
-      e.preventDefault();
-      resetRound();
-    }
-  });
-  window.addEventListener('keyup', e => state.keys[e.code] = false);
-  
-  resetRound();
-  requestAnimationFrame(gameLoop);
-}
+// === 게임 상태 ===
+let gameState = {
+    center: { x: canvas.width / 2, y: canvas.height / 2 },
+    player: { x: 0, y: 0, vx: 0, vy: 0 },
+    score: 0,
+    bestScore: 0,
+    heat: 0,
+    nearMissActivated: false,
+    shake: { x: 0, y: 0 },
+    stars: [],           // 작은 별들
+    starBodies: [],      // 항성들
+    keys: {},
+    lastTime: performance.now(),
+    lastStarBodySpawn: performance.now()
+};
 
-function resizeCanvas() {
-  W = canvas.width = window.innerWidth;
-  H = canvas.height = window.innerHeight;
-  centerX = W / 2;
-  centerY = H / 2;
+// === 초기화 ===
+function init() {
+    gameState.bestScore = parseFloat(localStorage.getItem('eventHorizonBest')) || 0;
+    resetRound();
+    updateUI();
+    spawnStars();
+    gameLoop();
 }
 
 function resetRound() {
-  state.currentScore = 0;
-  state.heat = 0;
-  state.invincible = 0;
-  state.gameOver = false;
-  state.message = '';
-  hideMessage();
-  
-  // 플레이어 스폰 (scoreRadius 경계 근처)
-  const angle = Math.random() * Math.PI * 2;
-  const spawnDist = PARAMS.scoreRadius * 0.9;
-  state.player = {
-    x: Math.cos(angle) * spawnDist,
-    y: Math.sin(angle) * spawnDist,
-    vx: 0,
-    vy: 0,
-    radius: PARAMS.playerRadius,
-    mass: PARAMS.playerMass
-  };
-  
-  // 소행성 스폰
-  state.asteroids = [];
-  for (let i = 0; i < PARAMS.asteroidCount; i++) {
-    spawnAsteroid();
-  }
+    gameState.player = {
+        x: gameState.center.x + 300,
+        y: gameState.center.y,
+        vx: 0,
+        vy: -50
+    };
+    gameState.score = 0;
+    gameState.heat = 0;
+    gameState.nearMissActivated = false;
+    gameState.shake = { x: 0, y: 0 };
+    document.getElementById('status').textContent = '';
 }
 
-function spawnAsteroid() {
-  const angle = Math.random() * Math.PI * 2;
-  const dist = PARAMS.asteroidSpawnMin + Math.random() * (PARAMS.asteroidSpawnMax - PARAMS.asteroidSpawnMin);
-  const radius = PARAMS.asteroidMinRadius + Math.random() * (PARAMS.asteroidMaxRadius - PARAMS.asteroidMinRadius);
-  const mass = PARAMS.asteroidMinMass + Math.random() * (PARAMS.asteroidMaxMass - PARAMS.asteroidMinMass);
-  
-  // 초기 궤도 속도
-  const orbitalSpeed = Math.sqrt(PARAMS.G * PARAMS.blackHoleMass / dist) * (0.7 + Math.random() * 0.6);
-  const perpAngle = angle + Math.PI / 2;
-  
-  state.asteroids.push({
-    x: Math.cos(angle) * dist,
-    y: Math.sin(angle) * dist,
-    vx: Math.cos(perpAngle) * orbitalSpeed,
-    vy: Math.sin(perpAngle) * orbitalSpeed,
-    radius,
-    mass
-  });
-}
-
-// ===== 물리 =====
-function applyGravity(obj, dt) {
-  let ax = 0, ay = 0;
-  
-  // 블랙홀 중력
-  const dx = -obj.x;
-  const dy = -obj.y;
-  const r2 = dx * dx + dy * dy + PARAMS.softening;
-  const r = Math.sqrt(r2);
-  const force = PARAMS.G * PARAMS.blackHoleMass / r2;
-  ax += force * dx / r;
-  ay += force * dy / r;
-  
-  // 거대 천체 중력
-  for (const planet of PARAMS.planets) {
-    const pdx = planet.x - obj.x;
-    const pdy = planet.y - obj.y;
-    const pr2 = pdx * pdx + pdy * pdy + PARAMS.softening;
-    const pr = Math.sqrt(pr2);
-    const pforce = PARAMS.G * planet.mass / pr2;
-    ax += pforce * pdx / pr;
-    ay += pforce * pdy / pr;
-  }
-  
-  // Semi-implicit Euler
-  obj.vx += ax * dt;
-  obj.vy += ay * dt;
-  
-  // 속도 제한 (플레이어만)
-  if (obj === state.player) {
-    const speed = Math.sqrt(obj.vx * obj.vx + obj.vy * obj.vy);
-    if (speed > PARAMS.maxSpeed) {
-      obj.vx *= PARAMS.maxSpeed / speed;
-      obj.vy *= PARAMS.maxSpeed / speed;
+function spawnStars() {
+    gameState.stars = [];
+    for (let i = 0; i < PARAMS.starCount; i++) {
+        spawnStar();
     }
-  }
-  
-  // 감쇠
-  obj.vx *= PARAMS.dampingFactor;
-  obj.vy *= PARAMS.dampingFactor;
-  
-  obj.x += obj.vx * dt;
-  obj.y += obj.vy * dt;
-  
-  // NaN 방지
-  if (!isFinite(obj.x) || !isFinite(obj.y) || !isFinite(obj.vx) || !isFinite(obj.vy)) {
-    obj.x = obj.y = 0;
-    obj.vx = obj.vy = 0;
-  }
 }
 
-function handleInput(dt) {
-  if (state.gameOver) return;
-  
-  let thrustX = 0, thrustY = 0;
-  
-  if (state.keys['KeyW'] || state.keys['ArrowUp']) thrustY -= 1;
-  if (state.keys['KeyS'] || state.keys['ArrowDown']) thrustY += 1;
-  if (state.keys['KeyA'] || state.keys['ArrowLeft']) thrustX -= 1;
-  if (state.keys['KeyD'] || state.keys['ArrowRight']) thrustX += 1;
-  
-  const len = Math.sqrt(thrustX * thrustX + thrustY * thrustY);
-  if (len > 0) {
-    thrustX /= len;
-    thrustY /= len;
+function spawnStar() {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = PARAMS.starSpawnMin + Math.random() * (PARAMS.starSpawnMax - PARAMS.starSpawnMin);
+    const x = gameState.center.x + Math.cos(angle) * dist;
+    const y = gameState.center.y + Math.sin(angle) * dist;
     
-    const boost = state.keys['ShiftLeft'] || state.keys['ShiftRight'];
-    const power = PARAMS.thrustPower * (boost ? PARAMS.boostMultiplier : 1);
-    const heatCost = boost ? PARAMS.heatPerBoost : PARAMS.heatPerThrust;
+    // 초기 속도: 블랙홀 방향 + 접선 성분
+    const speed = PARAMS.starInitialSpeedMin + Math.random() * (PARAMS.starInitialSpeedMax - PARAMS.starInitialSpeedMin);
+    const radialVx = -Math.cos(angle) * speed;
+    const radialVy = -Math.sin(angle) * speed;
+    const tangentAngle = angle + Math.PI / 2;
+    const tangentSpeed = speed * PARAMS.starTangentRatio * (Math.random() > 0.5 ? 1 : -1);
     
-    state.player.vx += thrustX * power * dt;
-    state.player.vy += thrustY * power * dt;
-    state.heat = Math.min(PARAMS.maxHeat, state.heat + heatCost * dt);
-  }
-  
-  // 열 냉각
-  state.heat = Math.max(0, state.heat - PARAMS.heatCoolRate * dt);
+    gameState.stars.push({
+        x: x,
+        y: y,
+        vx: radialVx + Math.cos(tangentAngle) * tangentSpeed,
+        vy: radialVy + Math.sin(tangentAngle) * tangentSpeed,
+        size: 1 + Math.random() * 1.5,
+        twinkle: Math.random() * Math.PI * 2,
+        twinkleSpeed: 2 + Math.random() * 3
+    });
 }
 
-function checkCollisions(dt) {
-  if (state.gameOver || state.invincible > 0) return;
-  
-  const p = state.player;
-  for (const ast of state.asteroids) {
-    const dx = p.x - ast.x;
-    const dy = p.y - ast.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
+function trySpawnStarBody(now) {
+    if (now - gameState.lastStarBodySpawn < PARAMS.starBodySpawnInterval) return;
+    if (gameState.starBodies.length >= PARAMS.starBodyMaxCount) return;
+    if (Math.random() > PARAMS.starBodyProbability) return;
     
-    if (dist < p.radius + ast.radius) {
-      // 충돌 반응
-      const nx = dx / dist;
-      const ny = dy / dist;
-      
-      // 상대 속도
-      const rvx = p.vx - ast.vx;
-      const rvy = p.vy - ast.vy;
-      const rvn = rvx * nx + rvy * ny;
-      
-      if (rvn < 0) {
-        const restitution = 0.6;
-        const impulse = -(1 + restitution) * rvn / (1 / p.mass + 1 / ast.mass);
+    const angle = Math.random() * Math.PI * 2;
+    const dist = PARAMS.starSpawnMax + 50;
+    const x = gameState.center.x + Math.cos(angle) * dist;
+    const y = gameState.center.y + Math.sin(angle) * dist;
+    
+    // 항성 초기 속도 (약간의 궤도 운동)
+    const speed = 40 + Math.random() * 30;
+    const tangentAngle = angle + Math.PI / 2;
+    
+    const colors = ['#ffaa00', '#ff6600', '#ff9933', '#ffcc66'];
+    
+    gameState.starBodies.push({
+        x: x,
+        y: y,
+        vx: Math.cos(tangentAngle) * speed,
+        vy: Math.sin(tangentAngle) * speed,
+        radius: PARAMS.starBodyRadius,
+        mass: PARAMS.starBodyMass,
+        softening: PARAMS.starBodySoftening,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        glow: 0
+    });
+    
+    gameState.lastStarBodySpawn = now;
+}
+
+// === 입력 처리 ===
+document.addEventListener('keydown', (e) => {
+    gameState.keys[e.key.toLowerCase()] = true;
+    
+    if (e.code === 'Space') {
+        e.preventDefault();
+        escapeRound();
+    }
+    if (e.key.toLowerCase() === 'r') {
+        resetRound();
+    }
+});
+
+document.addEventListener('keyup', (e) => {
+    gameState.keys[e.key.toLowerCase()] = false;
+});
+
+function escapeRound() {
+    let finalScore = gameState.score;
+    
+    if (gameState.nearMissActivated) {
+        finalScore *= PARAMS.nearMissBonus;
+        document.getElementById('status').textContent = 
+            `🔥 NEAR MISS! ${Math.floor(finalScore)} (+${PARAMS.nearMissBonus}x)`;
+    } else {
+        document.getElementById('status').textContent = 
+            `탈출 성공: ${Math.floor(finalScore)}`;
+    }
+    
+    if (finalScore > gameState.bestScore) {
+        gameState.bestScore = finalScore;
+        localStorage.setItem('eventHorizonBest', gameState.bestScore.toString());
+    }
+    
+    setTimeout(() => resetRound(), 1000);
+}
+
+// === 물리 업데이트 ===
+function update(dt) {
+    const p = gameState.player;
+    const c = gameState.center;
+    
+    // 거리 계산
+    const dx = c.x - p.x;
+    const dy = c.y - p.y;
+    const r = Math.sqrt(dx * dx + dy * dy);
+    
+    // 사건의 지평선 체크
+    if (r <= PARAMS.r_s) {
+        document.getElementById('status').textContent = '흡수됨! 점수 손실';
+        setTimeout(() => resetRound(), 1000);
+        return;
+    }
+    
+    // Near Miss 체크
+    if (r <= PARAMS.r_s + PARAMS.nearMissWindow) {
+        gameState.nearMissActivated = true;
+    }
+    
+    // 블랙홀 중력 계산
+    const gravMag = PARAMS.GM / (r * r + PARAMS.softening);
+    let gravX = (dx / r) * gravMag;
+    let gravY = (dy / r) * gravMag;
+    
+    // 항성 중력 영향 (플레이어에게)
+    gameState.starBodies.forEach(sb => {
+        const sbdx = sb.x - p.x;
+        const sbdy = sb.y - p.y;
+        const sbr = Math.sqrt(sbdx * sbdx + sbdy * sbdy);
+        if (sbr > PARAMS.eps) {
+            const sbGravMag = (PARAMS.GStar * sb.mass) / (sbr * sbr + sb.softening);
+            gravX += (sbdx / sbr) * sbGravMag;
+            gravY += (sbdy / sbr) * sbGravMag;
+        }
+    });
+    
+    // 추력 계산
+    let thrustX = 0;
+    let thrustY = 0;
+    let thrusting = false;
+    
+    if (gameState.heat < 1.0) {
+        if (gameState.keys['w'] || gameState.keys['arrowup']) {
+            thrustY -= PARAMS.thrustForce;
+            thrusting = true;
+        }
+        if (gameState.keys['s'] || gameState.keys['arrowdown']) {
+            thrustY += PARAMS.thrustForce;
+            thrusting = true;
+        }
+        if (gameState.keys['a'] || gameState.keys['arrowleft']) {
+            thrustX -= PARAMS.thrustForce;
+            thrusting = true;
+        }
+        if (gameState.keys['d'] || gameState.keys['arrowright']) {
+            thrustX += PARAMS.thrustForce;
+            thrusting = true;
+        }
+    }
+    
+    // 열 관리
+    if (thrusting) {
+        gameState.heat += PARAMS.heatRate * dt;
+    } else {
+        gameState.heat -= PARAMS.coolRate * dt;
+    }
+    gameState.heat = Math.max(0, Math.min(1, gameState.heat));
+    
+    // Semi-implicit Euler
+    p.vx += (gravX + thrustX) * dt;
+    p.vy += (gravY + thrustY) * dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    
+    // 점수 계산
+    const d = Math.max(r - PARAMS.r_s, PARAMS.eps);
+    const multiplier = Math.min(PARAMS.scoreScale / d, PARAMS.multMax);
+    gameState.score += PARAMS.baseRate * multiplier * dt;
+    
+    // 화면 흔들림
+    const shakeIntensity = Math.min(PARAMS.shakeScale / (r - PARAMS.r_s + PARAMS.eps), PARAMS.maxShake);
+    gameState.shake.x = (Math.random() - 0.5) * shakeIntensity;
+    gameState.shake.y = (Math.random() - 0.5) * shakeIntensity;
+    
+    // 별 업데이트
+    for (let i = gameState.stars.length - 1; i >= 0; i--) {
+        const star = gameState.stars[i];
         
-        p.vx += impulse * nx / p.mass;
-        p.vy += impulse * ny / p.mass;
-        ast.vx -= impulse * nx / ast.mass;
-        ast.vy -= impulse * ny / ast.mass;
+        // 블랙홀 중력
+        const sdx = c.x - star.x;
+        const sdy = c.y - star.y;
+        const sr = Math.sqrt(sdx * sdx + sdy * sdy);
         
-        // 분리
-        const overlap = p.radius + ast.radius - dist;
-        p.x += nx * overlap * 0.6;
-        p.y += ny * overlap * 0.6;
-        ast.x -= nx * overlap * 0.4;
-        ast.y -= ny * overlap * 0.4;
-      }
-      
-      // 패널티
-      state.currentScore = Math.max(0, state.currentScore - PARAMS.collisionPenalty);
-      state.heat = Math.min(PARAMS.maxHeat, state.heat + 15);
-      state.invincible = PARAMS.invincibilityTime;
-      
-      break;
+        if (sr <= PARAMS.r_s) {
+            gameState.stars.splice(i, 1);
+            spawnStar();
+            continue;
+        }
+        
+        let sGravX = 0;
+        let sGravY = 0;
+        
+        if (sr > PARAMS.eps) {
+            const sGravMag = PARAMS.GM / (sr * sr + PARAMS.softening);
+            sGravX = (sdx / sr) * sGravMag;
+            sGravY = (sdy / sr) * sGravMag;
+        }
+        
+        // 항성 중력 영향
+        gameState.starBodies.forEach(sb => {
+            const sbdx = sb.x - star.x;
+            const sbdy = sb.y - star.y;
+            const sbr = Math.sqrt(sbdx * sbdx + sbdy * sbdy);
+            if (sbr > PARAMS.eps) {
+                const sbGravMag = (PARAMS.GStar * sb.mass) / (sbr * sbr + sb.softening);
+                sGravX += (sbdx / sbr) * sbGravMag;
+                sGravY += (sbdy / sbr) * sbGravMag;
+            }
+        });
+        
+        star.vx += sGravX * dt;
+        star.vy += sGravY * dt;
+        star.x += star.vx * dt;
+        star.y += star.vy * dt;
+        
+        star.twinkle += star.twinkleSpeed * dt;
+        
+        // 플레이어 충돌 체크
+        const pdx = p.x - star.x;
+        const pdy = p.y - star.y;
+        const pDist = Math.sqrt(pdx * pdx + pdy * pdy);
+        if (pDist < PARAMS.playerRadius + PARAMS.starCollisionRadius) {
+            document.getElementById('status').textContent = '⭐ 별 충돌!';
+            setTimeout(() => resetRound(), 800);
+            return;
+        }
     }
-  }
-}
-
-function updateScore(dt) {
-  if (state.gameOver) return;
-  
-  const r = Math.sqrt(state.player.x * state.player.x + state.player.y * state.player.y);
-  
-  // 사건의 지평선 체크
-  if (r <= PARAMS.eventHorizon) {
-    endRound(false, '블랙홀 흡수!');
-    return;
-  }
-  
-  // scoreRadius 밖이면 자동 캐시아웃
-  if (r > PARAMS.scoreRadius) {
-    cashOut();
-    return;
-  }
-  
-  // 점수 누적 (scoreRadius 안에서만)
-  const d = Math.max(r - PARAMS.eventHorizon, 1);
-  const multiplier = Math.min(PARAMS.scoreScale / d, PARAMS.maxMultiplier);
-  state.currentScore += PARAMS.baseScoreRate * multiplier * dt;
-}
-
-function cashOut() {
-  if (state.gameOver) return;
-  
-  const r = Math.sqrt(state.player.x * state.player.x + state.player.y * state.player.y);
-  let finalScore = state.currentScore;
-  
-  // Near Miss 보너스 (탈출 시점에만, 위험 구간에 있을 때만)
-  if (r > PARAMS.eventHorizon && r <= PARAMS.eventHorizon + PARAMS.nearMissWindow) {
-    finalScore *= PARAMS.nearMissBonus;
-    showMessage(`Near Miss! ×${PARAMS.nearMissBonus.toFixed(1)} 보너스!`, 1500);
-  }
-  
-  state.totalScore += Math.floor(finalScore);
-  state.round++;
-  resetRound();
-}
-
-function endRound(success, msg) {
-  state.gameOver = true;
-  state.message = msg;
-  showMessage(msg, 2000);
-  
-  setTimeout(() => {
-    if (!success) {
-      state.totalScore = Math.max(0, state.totalScore - Math.floor(state.currentScore * 0.5));
+    
+    // 항성 업데이트
+    for (let i = gameState.starBodies.length - 1; i >= 0; i--) {
+        const sb = gameState.starBodies[i];
+        
+        // 블랙홀 중력
+        const sbdx = c.x - sb.x;
+        const sbdy = c.y - sb.y;
+        const sbr = Math.sqrt(sbdx * sbdx + sbdy * sbdy);
+        
+        if (sbr <= PARAMS.r_s) {
+            gameState.starBodies.splice(i, 1);
+            continue;
+        }
+        
+        if (sbr > PARAMS.eps) {
+            const sbGravMag = PARAMS.GM / (sbr * sbr + PARAMS.softening);
+            sb.vx += (sbdx / sbr) * sbGravMag * dt;
+            sb.vy += (sbdy / sbr) * sbGravMag * dt;
+        }
+        
+        sb.x += sb.vx * dt;
+        sb.y += sb.vy * dt;
+        sb.glow = (sb.glow + dt * 3) % (Math.PI * 2);
     }
-    state.round++;
-    resetRound();
-  }, 2000);
+    
+    updateUI();
 }
 
-// ===== 렌더링 =====
+// === 렌더링 ===
 function render() {
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, W, H);
-  
-  ctx.save();
-  ctx.translate(centerX, centerY);
-  
-  // 점수 반경
-  ctx.strokeStyle = 'rgba(0, 255, 255, 0.2)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(0, 0, PARAMS.scoreRadius, 0, Math.PI * 2);
-  ctx.stroke();
-  
-  // 사건의 지평선
-  const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, PARAMS.eventHorizon);
-  gradient.addColorStop(0, 'rgba(255, 0, 0, 0.8)');
-  gradient.addColorStop(0.7, 'rgba(100, 0, 100, 0.5)');
-  gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-  ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.arc(0, 0, PARAMS.eventHorizon, 0, Math.PI * 2);
-  ctx.fill();
-  
-  ctx.strokeStyle = '#f00';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.arc(0, 0, PARAMS.eventHorizon, 0, Math.PI * 2);
-  ctx.stroke();
-  
-  // Near Miss 구역
-  ctx.strokeStyle = 'rgba(255, 255, 0, 0.3)';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([5, 5]);
-  ctx.beginPath();
-  ctx.arc(0, 0, PARAMS.eventHorizon + PARAMS.nearMissWindow, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  
-  // 거대 천체
-  for (const planet of PARAMS.planets) {
-    const glow = ctx.createRadialGradient(planet.x, planet.y, 0, planet.x, planet.y, planet.radius * 1.5);
-    glow.addColorStop(0, planet.color);
-    glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    ctx.fillStyle = glow;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.save();
+    ctx.translate(gameState.shake.x, gameState.shake.y);
+    
+    const c = gameState.center;
+    const p = gameState.player;
+    
+    // 작은 별들
+    gameState.stars.forEach(star => {
+        const alpha = 0.5 + Math.sin(star.twinkle) * 0.3;
+        const hue = 200 + Math.random() * 40;
+        ctx.fillStyle = `hsla(${hue}, 70%, 80%, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    
+    // 항성들
+    gameState.starBodies.forEach(sb => {
+        const glowSize = sb.radius + 10 + Math.sin(sb.glow) * 5;
+        const gradient = ctx.createRadialGradient(sb.x, sb.y, 0, sb.x, sb.y, glowSize);
+        gradient.addColorStop(0, sb.color);
+        gradient.addColorStop(0.5, sb.color + '88');
+        gradient.addColorStop(1, 'transparent');
+        
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(sb.x, sb.y, glowSize, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = sb.color;
+        ctx.beginPath();
+        ctx.arc(sb.x, sb.y, sb.radius, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    
+    // 블랙홀
+    const gradient = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, PARAMS.r_s);
+    gradient.addColorStop(0, '#000');
+    gradient.addColorStop(1, '#111');
+    ctx.fillStyle = gradient;
     ctx.beginPath();
-    ctx.arc(planet.x, planet.y, planet.radius * 1.5, 0, Math.PI * 2);
+    ctx.arc(c.x, c.y, PARAMS.r_s, 0, Math.PI * 2);
     ctx.fill();
     
-    ctx.fillStyle = planet.color;
-    ctx.beginPath();
-    ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  
-  // 소행성
-  for (const ast of state.asteroids) {
-    ctx.fillStyle = '#888';
-    ctx.strokeStyle = '#555';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(ast.x, ast.y, ast.radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-  }
-  
-  // 플레이어
-  if (state.player) {
-    const p = state.player;
-    
-    // 무적 시 깜빡임
-    if (state.invincible > 0 && Math.floor(state.invincible * 10) % 2 === 0) {
-      ctx.globalAlpha = 0.5;
-    }
-    
-    // 추진 이펙트
-    const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
-    if (speed > 10) {
-      const angle = Math.atan2(p.vy, p.vx);
-      ctx.fillStyle = 'rgba(255, 150, 0, 0.5)';
-      ctx.beginPath();
-      ctx.arc(p.x - Math.cos(angle) * p.radius, p.y - Math.sin(angle) * p.radius, p.radius * 0.6, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    
-    // 선체
-    ctx.fillStyle = state.heat > 80 ? '#f00' : '#0f0';
-    ctx.strokeStyle = '#fff';
+    // 사건의 지평선
+    ctx.strokeStyle = '#f00';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.arc(c.x, c.y, PARAMS.r_s, 0, Math.PI * 2);
     ctx.stroke();
     
-    ctx.globalAlpha = 1;
-  }
-  
-  ctx.restore();
-  
-  // UI 업데이트
-  updateUI();
+    // 위험 구간
+    ctx.strokeStyle = '#ff0';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, PARAMS.r_s + PARAMS.nearMissWindow, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    
+    // 플레이어
+    const dx = p.x - c.x;
+    const dy = p.y - c.y;
+    const angle = Math.atan2(dy, dx);
+    
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(angle + Math.PI / 2);
+    
+    ctx.fillStyle = '#0ff';
+    ctx.beginPath();
+    ctx.moveTo(0, -10);
+    ctx.lineTo(-6, 10);
+    ctx.lineTo(6, 10);
+    ctx.closePath();
+    ctx.fill();
+    
+    if (gameState.heat < 1.0 && (gameState.keys['w'] || gameState.keys['s'] || 
+        gameState.keys['a'] || gameState.keys['d'] ||
+        gameState.keys['arrowup'] || gameState.keys['arrowdown'] ||
+        gameState.keys['arrowleft'] || gameState.keys['arrowright'])) {
+        ctx.fillStyle = '#f80';
+        ctx.beginPath();
+        ctx.moveTo(-3, 10);
+        ctx.lineTo(0, 20);
+        ctx.lineTo(3, 10);
+        ctx.closePath();
+        ctx.fill();
+    }
+    
+    ctx.restore();
+    ctx.restore();
 }
 
+// === UI 업데이트 ===
 function updateUI() {
-  document.getElementById('round').textContent = state.round;
-  document.getElementById('currentScore').textContent = Math.floor(state.currentScore);
-  document.getElementById('totalScore').textContent = Math.floor(state.totalScore);
-  document.getElementById('heat').textContent = Math.floor(state.heat);
-  
-  if (state.player) {
-    const r = Math.sqrt(state.player.x * state.player.x + state.player.y * state.player.y);
-    document.getElementById('distance').textContent = Math.floor(r);
-  }
+    const p = gameState.player;
+    const c = gameState.center;
+    const dx = c.x - p.x;
+    const dy = c.y - p.y;
+    const r = Math.sqrt(dx * dx + dy * dy);
+    
+    document.getElementById('current-score').textContent = Math.floor(gameState.score);
+    document.getElementById('best-score').textContent = Math.floor(gameState.bestScore);
+    document.getElementById('distance').textContent = Math.floor(r - PARAMS.r_s);
+    document.getElementById('heat-fill').style.width = (gameState.heat * 100) + '%';
 }
 
-function showMessage(msg, duration) {
-  const el = document.getElementById('message');
-  el.textContent = msg;
-  el.style.display = 'block';
-  setTimeout(() => el.style.display = 'none', duration);
-}
-
-function hideMessage() {
-  document.getElementById('message').style.display = 'none';
-}
-
-// ===== 게임 루프 =====
-function gameLoop(time) {
-  const dt = Math.min((time - state.lastTime) / 1000, PARAMS.maxDT);
-  state.lastTime = time;
-  
-  if (dt > 0 && !state.gameOver) {
-    handleInput(dt);
+// === 게임 루프 ===
+function gameLoop() {
+    const now = performance.now();
+    let dt = (now - gameState.lastTime) / 1000;
+    dt = Math.min(dt, 0.05); // dt 클램핑
+    gameState.lastTime = now;
     
-    applyGravity(state.player, dt);
+    trySpawnStarBody(now);
+    update(dt);
+    render();
     
-    for (const ast of state.asteroids) {
-      applyGravity(ast, dt);
-      
-      // 블랙홀 흡수 체크
-      const r = Math.sqrt(ast.x * ast.x + ast.y * ast.y);
-      if (r <= PARAMS.eventHorizon) {
-        const angle = Math.random() * Math.PI * 2;
-        const dist = PARAMS.asteroidSpawnMin + Math.random() * (PARAMS.asteroidSpawnMax - PARAMS.asteroidSpawnMin);
-        ast.x = Math.cos(angle) * dist;
-        ast.y = Math.sin(angle) * dist;
-        
-        const orbitalSpeed = Math.sqrt(PARAMS.G * PARAMS.blackHoleMass / dist) * (0.7 + Math.random() * 0.6);
-        const perpAngle = angle + Math.PI / 2;
-        ast.vx = Math.cos(perpAngle) * orbitalSpeed;
-        ast.vy = Math.sin(perpAngle) * orbitalSpeed;
-      }
-    }
-    
-    checkCollisions(dt);
-    updateScore(dt);
-    
-    if (state.invincible > 0) {
-      state.invincible = Math.max(0, state.invincible - dt);
-    }
-  }
-  
-  render();
-  requestAnimationFrame(gameLoop);
+    requestAnimationFrame(gameLoop);
 }
 
 init();
