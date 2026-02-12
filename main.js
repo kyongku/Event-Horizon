@@ -6,7 +6,7 @@ canvas.height = 800;
 
 // === 튜닝 파라미터 ===
 const PARAMS = {
-    GM: 80000,
+    GM: 180000,
     softening: 80,
     r_s: 80,
     thrustForce: 300,
