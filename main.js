@@ -6,41 +6,40 @@ canvas.height = 800;
 
 // === 튜닝 파라미터 ===
 const PARAMS = {
-    GM: 50000,
-    softening: 100,
+    GM: 80000,              // 중력 강화 (50000 → 80000)
+    softening: 80,          // 소프트닝 감소 (중력 더 강하게)
     r_s: 80,
-    thrustForce: 200,
+    thrustForce: 300,       // 추력 증가 (200 → 300)
     scoreScale: 100,
     multMax: 50,
-    baseRate: 10,
-    heatRate: 0.4,
-    coolRate: 0.15,
+    baseRate: 15,           // 점수 증가 속도 (10 → 15)
+    heatRate: 0.35,         // 열 증가 감소 (더 오래 추력 가능)
+    coolRate: 0.2,          // 냉각 속도 증가
     nearMissWindow: 30,
     nearMissBonus: 3.0,
     shakeScale: 500,
     maxShake: 15,
     eps: 0.1,
     
-    // 탄막 스타일 파라미터
-    starSpawnRate: 0.15,        // 별 생성 주기 (초) - 더 빠르게
-    maxStars: 300,              // 최대 별 개수 증가
+    starSpawnRate: 0.1,     // 별 생성 더 빠르게 (0.15 → 0.1)
+    maxStars: 400,          // 최대 별 개수 증가
     starSpawnMin: 800,
     starSpawnMax: 1000,
-    starInitialSpeedMin: 40,
-    starInitialSpeedMax: 70,
+    starInitialSpeedMin: 60,    // 초기 속도 증가
+    starInitialSpeedMax: 100,
     starTangentRatio: 0.8,
     playerRadius: 12,
     starCollisionRadius: 3,
     
-    starBodySpawnInterval: 10000,  // 항성 10초마다
-    starBodyProbability: 0.9,      // 90% 확률
-    starBodyMaxCount: 2,           // 최대 2개
+    starBodySpawnInterval: 8000,
+    starBodyProbability: 0.9,
+    starBodyMaxCount: 2,
     starBodyRadius: 18,
-    starBodyMass: 2000,
+    starBodyMass: 2500,
     starBodySoftening: 400,
-    GStar: 5000,
+    GStar: 6000,
     
-    screenMargin: 200
+    screenMargin: 150       // 화면 경계 여유 공간
 };
 
 let gameState = {
@@ -57,17 +56,99 @@ let gameState = {
     lastTime: 0,
     lastStarBodySpawn: 0,
     isRunning: false,
-    starSpawnTimer: 0
+    starSpawnTimer: 0,
+    
+    // 모바일 조이스틱
+    joystick: {
+        active: false,
+        startX: 0,
+        startY: 0,
+        currentX: 0,
+        currentY: 0,
+        dirX: 0,
+        dirY: 0
+    }
 };
+
+// 모바일 감지
+const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+                 (window.matchMedia && window.matchMedia("(max-width: 768px)").matches);
 
 function init() {
     gameState.bestScore = parseFloat(localStorage.getItem('eventHorizonBest')) || 0;
     gameState.lastTime = performance.now();
     gameState.lastStarBodySpawn = performance.now();
+    
+    setupMobileControls();
     resetRound();
     updateUI();
     gameState.isRunning = true;
     requestAnimationFrame(gameLoop);
+}
+
+function setupMobileControls() {
+    if (!isMobile) return;
+    
+    const joystickBase = document.getElementById('joystick-base');
+    const joystickStick = document.getElementById('joystick-stick');
+    const escapeBtn = document.getElementById('mobile-escape');
+    
+    // 조이스틱 터치 시작
+    joystickBase.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const rect = joystickBase.getBoundingClientRect();
+        gameState.joystick.active = true;
+        gameState.joystick.startX = rect.left + rect.width / 2;
+        gameState.joystick.startY = rect.top + rect.height / 2;
+    });
+    
+    // 조이스틱 터치 이동
+    joystickBase.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        if (!gameState.joystick.active) return;
+        
+        const touch = e.touches[0];
+        const deltaX = touch.clientX - gameState.joystick.startX;
+        const deltaY = touch.clientY - gameState.joystick.startY;
+        
+        const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+        const maxDistance = 35;
+        
+        if (distance > maxDistance) {
+            const angle = Math.atan2(deltaY, deltaX);
+            gameState.joystick.currentX = Math.cos(angle) * maxDistance;
+            gameState.joystick.currentY = Math.sin(angle) * maxDistance;
+        } else {
+            gameState.joystick.currentX = deltaX;
+            gameState.joystick.currentY = deltaY;
+        }
+        
+        gameState.joystick.dirX = gameState.joystick.currentX / maxDistance;
+        gameState.joystick.dirY = gameState.joystick.currentY / maxDistance;
+        
+        joystickStick.style.transform = 
+            `translate(calc(-50% + ${gameState.joystick.currentX}px), calc(-50% + ${gameState.joystick.currentY}px))`;
+    });
+    
+    // 조이스틱 터치 종료
+    const endJoystick = () => {
+        gameState.joystick.active = false;
+        gameState.joystick.currentX = 0;
+        gameState.joystick.currentY = 0;
+        gameState.joystick.dirX = 0;
+        gameState.joystick.dirY = 0;
+        joystickStick.style.transform = 'translate(-50%, -50%)';
+    };
+    
+    joystickBase.addEventListener('touchend', endJoystick);
+    joystickBase.addEventListener('touchcancel', endJoystick);
+    
+    // 탈출 버튼
+    escapeBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        escapeRound();
+    });
 }
 
 function resetRound() {
@@ -81,7 +162,7 @@ function resetRound() {
     gameState.heat = 0;
     gameState.nearMissActivated = false;
     gameState.shake = { x: 0, y: 0 };
-    gameState.stars = [];           // 리셋 시 별 초기화
+    gameState.stars = [];
     gameState.starBodies = [];
     gameState.starSpawnTimer = 0;
     document.getElementById('status').textContent = '';
@@ -102,7 +183,7 @@ function spawnStar() {
     
     const orbitalSpeed = Math.sqrt(PARAMS.GM / dist) * 0.7;
     const tangentAngle = angle + Math.PI / 2;
-    const radialSpeed = -10 - Math.random() * 15;
+    const radialSpeed = -10 - Math.random() * 20;
     
     gameState.stars.push({
         x: x,
@@ -133,7 +214,7 @@ function trySpawnStarBody(now) {
     
     const orbitalSpeed = Math.sqrt(PARAMS.GM / distToCenter) * 0.6;
     const tangentAngle = angle + Math.PI / 2;
-    const radialSpeed = 20;
+    const radialSpeed = 30;
     
     const colors = ['#ffaa00', '#ff6600', '#ff9933', '#ffcc66'];
     
@@ -194,7 +275,6 @@ function update(dt) {
     const p = gameState.player;
     const c = gameState.center;
     
-    // 별 계속 생성 (탄막 스타일)
     gameState.starSpawnTimer += dt;
     if (gameState.starSpawnTimer >= PARAMS.starSpawnRate) {
         if (gameState.stars.length < PARAMS.maxStars) {
@@ -253,6 +333,7 @@ function update(dt) {
     let thrusting = false;
     
     if (gameState.heat < 1.0) {
+        // 키보드 입력
         if (gameState.keys['w'] || gameState.keys['arrowup']) {
             thrustY -= PARAMS.thrustForce;
             thrusting = true;
@@ -268,6 +349,15 @@ function update(dt) {
         if (gameState.keys['d'] || gameState.keys['arrowright']) {
             thrustX += PARAMS.thrustForce;
             thrusting = true;
+        }
+        
+        // 조이스틱 입력
+        if (gameState.joystick.active) {
+            thrustX += gameState.joystick.dirX * PARAMS.thrustForce;
+            thrustY += gameState.joystick.dirY * PARAMS.thrustForce;
+            if (Math.abs(gameState.joystick.dirX) > 0.1 || Math.abs(gameState.joystick.dirY) > 0.1) {
+                thrusting = true;
+            }
         }
     }
     
@@ -291,7 +381,6 @@ function update(dt) {
     gameState.shake.x = (Math.random() - 0.5) * shakeIntensity;
     gameState.shake.y = (Math.random() - 0.5) * shakeIntensity;
     
-    // 별 업데이트
     for (let i = gameState.stars.length - 1; i >= 0; i--) {
         const star = gameState.stars[i];
         
@@ -350,7 +439,6 @@ function update(dt) {
         }
     }
     
-    // 항성 업데이트
     for (let i = gameState.starBodies.length - 1; i >= 0; i--) {
         const sb = gameState.starBodies[i];
         
@@ -392,7 +480,13 @@ function render() {
     const c = gameState.center;
     const p = gameState.player;
     
-    // 별 렌더링
+    // 화면 경계 표시
+    ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([10, 10]);
+    ctx.strokeRect(0, 0, canvas.width, canvas.height);
+    ctx.setLineDash([]);
+    
     gameState.stars.forEach(star => {
         ctx.fillStyle = `rgba(200, 220, 255, ${star.brightness})`;
         ctx.beginPath();
@@ -400,7 +494,6 @@ function render() {
         ctx.fill();
     });
     
-    // 항성 렌더링
     gameState.starBodies.forEach(sb => {
         const glowSize = sb.radius + 10 + Math.sin(sb.glow) * 5;
         const gradient = ctx.createRadialGradient(sb.x, sb.y, 0, sb.x, sb.y, glowSize);
@@ -419,7 +512,6 @@ function render() {
         ctx.fill();
     });
     
-    // 블랙홀
     const gradient = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, PARAMS.r_s);
     gradient.addColorStop(0, '#000');
     gradient.addColorStop(1, '#111');
@@ -434,7 +526,6 @@ function render() {
     ctx.arc(c.x, c.y, PARAMS.r_s, 0, Math.PI * 2);
     ctx.stroke();
     
-    // UFO
     ctx.save();
     ctx.translate(p.x, p.y);
     
@@ -458,39 +549,38 @@ function render() {
     ctx.arc(0, 0, PARAMS.playerRadius * 0.4, 0, Math.PI * 2);
     ctx.fill();
     
-    // 추력 분사
     if (gameState.heat < 1.0) {
-        ctx.fillStyle = '#f80';
+        const isThrusting = gameState.keys['w'] || gameState.keys['s'] || 
+                           gameState.keys['a'] || gameState.keys['d'] ||
+                           gameState.keys['arrowup'] || gameState.keys['arrowdown'] ||
+                           gameState.keys['arrowleft'] || gameState.keys['arrowright'] ||
+                           gameState.joystick.active;
         
-        if (gameState.keys['w'] || gameState.keys['arrowup']) {
+        if (isThrusting) {
+            ctx.fillStyle = '#f80';
+            
+            // 조이스틱 방향 또는 키 방향으로 분사
+            let thrustDirX = 0;
+            let thrustDirY = 0;
+            
+            if (gameState.joystick.active) {
+                thrustDirX = -gameState.joystick.dirX;
+                thrustDirY = -gameState.joystick.dirY;
+            } else {
+                if (gameState.keys['w'] || gameState.keys['arrowup']) thrustDirY = 1;
+                if (gameState.keys['s'] || gameState.keys['arrowdown']) thrustDirY = -1;
+                if (gameState.keys['a'] || gameState.keys['arrowleft']) thrustDirX = 1;
+                if (gameState.keys['d'] || gameState.keys['arrowright']) thrustDirX = -1;
+            }
+            
+            const angle = Math.atan2(thrustDirY, thrustDirX);
+            const flameX = Math.cos(angle) * PARAMS.playerRadius;
+            const flameY = Math.sin(angle) * PARAMS.playerRadius;
+            
             ctx.beginPath();
-            ctx.moveTo(-4, PARAMS.playerRadius);
-            ctx.lineTo(0, PARAMS.playerRadius + 12);
-            ctx.lineTo(4, PARAMS.playerRadius);
-            ctx.closePath();
-            ctx.fill();
-        }
-        if (gameState.keys['s'] || gameState.keys['arrowdown']) {
-            ctx.beginPath();
-            ctx.moveTo(-4, -PARAMS.playerRadius);
-            ctx.lineTo(0, -PARAMS.playerRadius - 12);
-            ctx.lineTo(4, -PARAMS.playerRadius);
-            ctx.closePath();
-            ctx.fill();
-        }
-        if (gameState.keys['a'] || gameState.keys['arrowleft']) {
-            ctx.beginPath();
-            ctx.moveTo(PARAMS.playerRadius, -4);
-            ctx.lineTo(PARAMS.playerRadius + 12, 0);
-            ctx.lineTo(PARAMS.playerRadius, 4);
-            ctx.closePath();
-            ctx.fill();
-        }
-        if (gameState.keys['d'] || gameState.keys['arrowright']) {
-            ctx.beginPath();
-            ctx.moveTo(-PARAMS.playerRadius, -4);
-            ctx.lineTo(-PARAMS.playerRadius - 12, 0);
-            ctx.lineTo(-PARAMS.playerRadius, 4);
+            ctx.moveTo(flameX - 4, flameY);
+            ctx.lineTo(flameX + Math.cos(angle) * 12, flameY + Math.sin(angle) * 12);
+            ctx.lineTo(flameX + 4, flameY);
             ctx.closePath();
             ctx.fill();
         }
